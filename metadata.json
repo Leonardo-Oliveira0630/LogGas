@@ -1,0 +1,7 @@
+{
+  "name": "LogGas",
+  "description": "A comprehensive stock and financial management system for gas, water, and beverage distributors.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
