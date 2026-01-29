@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   CreditCard,
   Zap,
-  LucideIcon
+  LucideIcon,
+  Store
 } from 'lucide-react';
 
 // MenuItem interface explicitly defines common properties and the optional badge property
@@ -43,6 +44,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, on
   const adminItems: MenuItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'online_orders', label: 'Pedidos Online', icon: Globe, badge: onlineOrdersCount },
+    { id: 'store_settings', label: 'Minha Loja', icon: Store },
     { id: 'inventory', label: 'Estoque', icon: Package },
     { id: 'sales', label: 'Vendas', icon: ShoppingCart },
     { id: 'finance', label: 'Financeiro', icon: DollarSign },
