@@ -38,11 +38,11 @@ export interface User {
 export interface Customer {
   id: string;
   name: string;
-  document: string;
+  document?: string;
   address: string;
   phone: string;
   customerName?: string;
-  creditLimit: number;
+  creditLimit?: number;
   status: 'active' | 'debtor';
   lastPurchaseDate?: string;
   purchaseCount: number;
@@ -70,6 +70,7 @@ export interface Sale {
   customerId: string;
   customerName: string;
   customerAddress?: string;
+  customerPhone?: string;
   items: SaleItem[];
   total: number;
   paymentMethod: PaymentMethod;
@@ -100,7 +101,6 @@ export interface SaaSMetrics {
   systemHealth: 'perfect' | 'warning' | 'critical';
 }
 
-// Added missing DeliveryDriver and DeliveryRoute interfaces to fix import errors in Deliveries.tsx
 export interface DeliveryDriver {
   id: string;
   name: string;

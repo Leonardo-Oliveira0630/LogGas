@@ -10,7 +10,7 @@ import OnlineOrders from './pages/OnlineOrders';
 import Deliveries from './pages/Deliveries';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
-import CustomerStore from './pages/CustomerStore';
+import PublicStore from './pages/PublicStore';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import Billing from './pages/Billing';
 import { onAuthStateChanged } from "firebase/auth";
@@ -31,6 +31,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [storeId, setStoreId] = useState<string | null>(null);
   
   // Estados Sincronizados
   const [products, setProducts] = useState<Product[]>([]);
@@ -38,13 +39,21 @@ const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
 
+  // Detectar se é um acesso de cliente via link (SaaS Mode)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const dist = params.get('dist');
+    if (dist) {
+      setStoreId(dist);
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const profile = await dbGetUserProfile(firebaseUser.uid);
         if (profile) {
           setCurrentUser(profile);
-          // Se for super_admin, mudar aba padrão
           if (profile.role === 'super_admin') setActiveTab('super_admin');
         } else {
           setCurrentUser({
@@ -62,18 +71,29 @@ const App: React.FC = () => {
     return unsubscribe;
   }, []);
 
+  // Sincronização: Se for Admin logado OU se for um Cliente acessando uma StoreId específica
   useEffect(() => {
-    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'customer')) {
+    // Para simplificar no demo, se tiver storeId ou for admin, carregamos as coleções
+    // Em produção real, os produtos seriam filtrados por 'distributorId'
+    if (currentUser || storeId) {
       const unsubProducts = subscribeToCollection("products", setProducts);
-      const unsubSales = subscribeToCollection("sales", setSales);
-      const unsubTransactions = subscribeToCollection("transactions", setTransactions);
-      const unsubCustomers = subscribeToCollection("customers", setCustomers);
+      
+      // Apenas Admins veem vendas, transações e clientes globais
+      let unsubSales = () => {};
+      let unsubTransactions = () => {};
+      let unsubCustomers = () => {};
+
+      if (currentUser?.role === 'admin' || currentUser?.role === 'super_admin') {
+        unsubSales = subscribeToCollection("sales", setSales);
+        unsubTransactions = subscribeToCollection("transactions", setTransactions);
+        unsubCustomers = subscribeToCollection("customers", setCustomers);
+      }
 
       return () => {
         unsubProducts(); unsubSales(); unsubTransactions(); unsubCustomers();
       };
     }
-  }, [currentUser]);
+  }, [currentUser, storeId]);
 
   const handleAddProduct = async (newProduct: Product) => {
     const { id, ...data } = newProduct;
@@ -106,26 +126,35 @@ const App: React.FC = () => {
   const handleProcessSale = async (newSale: Sale) => {
     const { id, ...saleData } = newSale;
     await dbAddSale(saleData);
+    
+    // Baixa de estoque
     for (const item of newSale.items) {
       const product = products.find(p => p.id === item.productId);
       if (product) await dbUpdateProduct(product.id, { stock: Math.max(0, product.stock - item.quantity) });
     }
+
+    // Registro financeiro
     await dbAddTransaction({
       date: newSale.date,
-      description: `Venda ${newSale.origin} #${newSale.id} - ${newSale.customerName}`,
+      description: `Venda ${newSale.origin} - ${newSale.customerName}`,
       type: 'income',
       amount: newSale.total,
       category: 'Vendas'
     });
-    if (newSale.customerId !== '0') {
-      const customer = customers.find(c => c.id === newSale.customerId);
-      await dbUpdateCustomerStats(newSale.customerId, {
-        purchaseCount: (customer?.purchaseCount || 0) + 1,
-        totalSpent: (customer?.totalSpent || 0) + newSale.total,
-        lastPurchaseDate: newSale.date,
-        name: newSale.customerName
-      });
-    }
+
+    // Atualiza/Cria Cliente para o CRM do Admin
+    // Se for venda online, usamos o telefone como ID único simplificado
+    const customerUniqueId = newSale.customerId !== '0' ? newSale.customerId : (newSale.customerPhone || 'guest');
+    
+    await dbUpdateCustomerStats(customerUniqueId, {
+      name: newSale.customerName,
+      address: newSale.customerAddress || '',
+      phone: newSale.customerPhone || '',
+      purchaseCount: 1, // O service faz o merge/incremento
+      totalSpent: newSale.total,
+      lastPurchaseDate: newSale.date,
+      status: 'active'
+    });
   };
 
   const handleUpdateSaleStatus = async (saleId: string, status: SaleStatus) => {
@@ -136,23 +165,32 @@ const App: React.FC = () => {
     await auth.signOut();
   };
 
+  // 1. Prioridade: Se houver storeId na URL, mostra a Loja Pública (Independente de login)
+  if (storeId) {
+    return (
+      <PublicStore 
+        storeId={storeId} 
+        products={products} 
+        onProcessSale={handleProcessSale} 
+      />
+    );
+  }
+
   if (authLoading) {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50">
         <div className="w-12 h-12 border-4 border-[#0A3D62] border-t-transparent rounded-full animate-spin"></div>
-        <p className="mt-4 font-bold text-slate-400 animate-pulse uppercase tracking-widest text-xs">Sincronizando LogGas SaaS...</p>
+        <p className="mt-4 font-bold text-slate-400 animate-pulse uppercase tracking-widest text-xs">LogGas SaaS Infrastructure</p>
       </div>
     );
   }
 
+  // 2. Se não estiver logado e não for link de loja, pede login
   if (!currentUser) {
     return <Login onLogin={(u) => setCurrentUser(u)} />;
   }
 
-  if (currentUser.role === 'customer') {
-    return <CustomerStore user={currentUser} products={products} onProcessSale={handleProcessSale} onLogout={handleLogout} />;
-  }
-
+  // 3. Painel Administrativo
   const onlineOrdersPending = sales.filter(s => s.origin === 'online' && s.status === SaleStatus.PENDING).length;
 
   const renderContent = () => {
@@ -175,7 +213,7 @@ const App: React.FC = () => {
       case 'finance':
         return (
           <div className="p-8">
-            <h2 className="text-2xl font-bold mb-6 text-slate-900">Fluxo de Caixa da Distribuidora</h2>
+            <h2 className="text-2xl font-bold mb-6 text-slate-900">Fluxo de Caixa</h2>
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
@@ -221,7 +259,7 @@ const App: React.FC = () => {
         </div>
         
         <footer className="p-6 text-center text-slate-400 text-[10px] font-black uppercase tracking-widest border-t border-slate-200 print:hidden">
-          LogGas SaaS Infrastructure • {currentUser.companyName || 'Distribuidora LogGas'}
+          SaaS Instance: {currentUser.companyName || 'LogGas Cloud'} • ID: {currentUser.id.slice(0,8)}
         </footer>
       </main>
     </div>
